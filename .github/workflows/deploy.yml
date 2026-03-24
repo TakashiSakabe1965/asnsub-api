@@ -49,45 +49,49 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Ensure ECR repo
+        shell: bash
         run: |
-          aws ecr describe-repositories \
-            --repository-names ${ECR_PREFIX}${{ inputs.service }} \
-          || aws ecr create-repository \
-            --repository-name ${ECR_PREFIX}${{ inputs.service }}
+          set -euo pipefail
+          aws ecr describe-repositories --repository-names "${ECR_PREFIX}${{ inputs.service }}" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "${ECR_PREFIX}${{ inputs.service }}" >/dev/null
 
       - name: Build and push image
+        shell: bash
         run: |
-          REG=${{ steps.login.outputs.registry }}
-          REPO=${ECR_PREFIX}${{ inputs.service }}
-          docker build -t $REG/$REPO:latest .
-          docker push $REG/$REPO:latest
+          set -euo pipefail
+          REG="${{ steps.login.outputs.registry }}"
+          REPO="${ECR_PREFIX}${{ inputs.service }}"
+          docker build -t "$REG/$REPO:latest" .
+          docker push "$REG/$REPO:latest"
 
       - name: Deploy CloudFormation
+        shell: bash
         env:
-          STACK_NAME: ${STACK_PREFIX}${{ inputs.service }}-${{ inputs.env }}
-          BASE_STACK: ${BASE_STACK_PREFIX}-${{ inputs.env }}
+          STACK_NAME: ${{ env.STACK_PREFIX }}${{ inputs.service }}-${{ inputs.env }}
+          BASE_STACK: ${{ env.BASE_STACK_PREFIX }}-${{ inputs.env }}
           VPC_ID: ${{ secrets.VPC_ID }}
           SUBNET1: ${{ secrets.SUBNET1 }}
           SUBNET2: ${{ secrets.SUBNET2 }}
           ECS_SG_ID: ${{ secrets.ECS_SG_ID }}
           ASSIGN_PUBLIC_IP: ${{ secrets.ASSIGN_PUBLIC_IP }}
         run: |
-          REG=${{ steps.login.outputs.registry }}
-          REPO=${ECR_PREFIX}${{ inputs.service }}
+          set -euo pipefail
+          REG="${{ steps.login.outputs.registry }}"
+          REPO="${ECR_PREFIX}${{ inputs.service }}"
+          IMAGE="$REG/$REPO:latest"
 
           aws cloudformation deploy \
             --template-file infra/service.yml \
-            --stack-name $STACK_NAME \
+            --stack-name "$STACK_NAME" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              BaseStackName=$BASE_STACK \
-              ServiceName=${{ inputs.service }} \
-              ContainerImage=$REG/$REPO:latest \
-              ListenerPriority=${{ inputs.listener_priority }} \
-              VpcId=$VPC_ID \
-              Subnet1=$SUBNET1 \
-              Subnet2=$SUBNET2 \
-              EcsTaskSecurityGroupId=$ECS_SG_ID \
-              AssignPublicIp=$ASSIGN_PUBLIC_IP
-``
+              BaseStackName="$BASE_STACK" \
+              ServiceName="${{ inputs.service }}" \
+              ContainerImage="$IMAGE" \
+              ListenerPriority="${{ inputs.listener_priority }}" \
+              VpcId="$VPC_ID" \
+              Subnet1="$SUBNET1" \
+              Subnet2="$SUBNET2" \
+              EcsTaskSecurityGroupId="$ECS_SG_ID" \
+              AssignPublicIp="$ASSIGN_PUBLIC_IP"
