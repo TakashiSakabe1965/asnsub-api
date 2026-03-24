@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: asnsub base stack (ALB + ECS Cluster)
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  EcsTaskSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  ClusterName:
+    Type: String
+    Default: asnsub-cluster
+
+Resources:
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref Subnet1
+        - !Ref Subnet2
+      SecurityGroups:
+        - !Ref AlbSecurityGroupId
+
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 404
+            ContentType: text/plain
+            MessageBody: Not Found
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+
+Outputs:
+  AlbArn:
+    Value: !Ref Alb
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbArn"
+  AlbDns:
+    Value: !GetAtt Alb.DNSName
+  ListenerArn:
+    Value: !Ref AlbListener
+    Export:
+      Name: !Sub "${AWS::StackName}-ListenerArn"
+  ClusterName:
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterName"
+  EcsTaskSecurityGroupId:
+    Value: !Ref EcsTaskSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsTaskSg"
