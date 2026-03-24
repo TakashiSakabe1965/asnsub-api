@@ -1,23 +1,26 @@
-name: Deploy asnsub API (manual stable)
+name: Deploy asnsub API (dev auto / manual)
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/deploy.yml"
+      - "services/hindp/**"
+      - "services/hinfl/**"
+      - "services/hinpr/**"
   workflow_dispatch:
     inputs:
       service:
-        description: "service name (hindp / hinfl / hinpr)"
+        description: "service (hindp/hinfl/hinpr)"
         required: true
-        type: string
+        type: choice
+        options: [hindp, hinfl, hinpr]
       env:
         description: "environment"
         required: true
         default: dev
         type: choice
         options: [dev, stg, prod]
-      listener_priority:
-        description: "ALB rule priority (10 / 20 / 30)"
-        required: true
-        default: "10"
-        type: string
 
 permissions:
   id-token: write
@@ -31,9 +34,17 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/${{ inputs.service }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # push時はこの3つを必ず回す（今日中に終わらせるため）
+          - service: hindp
+            priority: 10
+          - service: hinfl
+            priority: 20
+          - service: hinpr
+            priority: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -48,27 +59,41 @@ jobs:
         id: login
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set target (push/manual)
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "service=${{ inputs.service }}" >> "$GITHUB_OUTPUT"
+            echo "env=${{ inputs.env }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "service=${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+            echo "env=dev" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Ensure ECR repo
         shell: bash
         run: |
           set -euo pipefail
-          aws ecr describe-repositories --repository-names "${ECR_PREFIX}${{ inputs.service }}" >/dev/null 2>&1 \
-            || aws ecr create-repository --repository-name "${ECR_PREFIX}${{ inputs.service }}" >/dev/null
+          REPO="${ECR_PREFIX}${{ steps.target.outputs.service }}"
+          aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$REPO" >/dev/null
 
-      - name: Build and push image
+      - name: Build & push image
         shell: bash
         run: |
           set -euo pipefail
+          SERVICE="${{ steps.target.outputs.service }}"
           REG="${{ steps.login.outputs.registry }}"
-          REPO="${ECR_PREFIX}${{ inputs.service }}"
-          docker build -t "$REG/$REPO:latest" .
+          REPO="${ECR_PREFIX}${SERVICE}"
+
+          docker build -t "$REG/$REPO:latest" "services/$SERVICE"
           docker push "$REG/$REPO:latest"
 
-      - name: Deploy CloudFormation
+      - name: Deploy CloudFormation (Service Stack)
         shell: bash
         env:
-          STACK_NAME: ${{ env.STACK_PREFIX }}${{ inputs.service }}-${{ inputs.env }}
-          BASE_STACK: ${{ env.BASE_STACK_PREFIX }}-${{ inputs.env }}
           VPC_ID: ${{ secrets.VPC_ID }}
           SUBNET1: ${{ secrets.SUBNET1 }}
           SUBNET2: ${{ secrets.SUBNET2 }}
@@ -76,20 +101,35 @@ jobs:
           ASSIGN_PUBLIC_IP: ${{ secrets.ASSIGN_PUBLIC_IP }}
         run: |
           set -euo pipefail
+          SERVICE="${{ steps.target.outputs.service }}"
+          ENVNAME="${{ steps.target.outputs.env }}"
           REG="${{ steps.login.outputs.registry }}"
-          REPO="${ECR_PREFIX}${{ inputs.service }}"
+          REPO="${ECR_PREFIX}${SERVICE}"
           IMAGE="$REG/$REPO:latest"
 
+          STACK_NAME="${STACK_PREFIX}${SERVICE}-${ENVNAME}"
+          BASE_STACK="${BASE_STACK_PREFIX}-${ENVNAME}"
+
+          # priority：push時は matrix の固定値、手動時はサービス別に固定（簡易）
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "$SERVICE" == "hindp" ]]; then PRIO=10
+            elif [[ "$SERVICE" == "hinfl" ]]; then PRIO=20
+            else PRIO=30
+            fi
+          else
+            PRIO="${{ matrix.priority }}"
+          fi
+
           aws cloudformation deploy \
-            --template-file infra/service.yml \
+            --template-file "services/$SERVICE/infra/service.yml" \
             --stack-name "$STACK_NAME" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               BaseStackName="$BASE_STACK" \
-              ServiceName="${{ inputs.service }}" \
+              ServiceName="$SERVICE" \
               ContainerImage="$IMAGE" \
-              ListenerPriority="${{ inputs.listener_priority }}" \
+              ListenerPriority="$PRIO" \
               VpcId="$VPC_ID" \
               Subnet1="$SUBNET1" \
               Subnet2="$SUBNET2" \
