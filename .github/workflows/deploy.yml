@@ -1,83 +1,45 @@
-name: Deploy HINDP only (final)
+name: Deploy HINDP to ECS
 
 on:
   push:
     branches: [ main ]
-    paths:
-      - ".github/workflows/deploy.yml"
-      - "services/hindp/**"
-
-permissions:
-  contents: read
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPO: asnsub-hindp
-  STACK_NAME: asnsub-hindp-dev
-  BASE_STACK: asnsub-base-dev
+  ECS_CLUSTER: asnsub-api-ecs
+  ECS_SERVICE: asnsub-api-hindp-v2
+  ECR_REPOSITORY: asnsub-hindp
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/hindp
+
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      # 固定 IAM キー（OIDC 使用しない）
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ★追加：ECR リポジトリが無ければ作成する（今回の失敗原因を潰す）
-      - name: Ensure ECR repo
-        shell: bash
+      - name: Build & Push Docker image
         run: |
-          set -euo pipefail
-          aws ecr describe-repositories --repository-names "${ECR_REPO}" >/dev/null 2>&1 \
-            || aws ecr create-repository --repository-name "${ECR_REPO}" >/dev/null
+          docker build -t ${ECR_REPOSITORY}:latest .
+          docker tag ${ECR_REPOSITORY}:latest \
+            854878589422.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${ECR_REPOSITORY}:latest
+          docker push \
+            854878589422.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${ECR_REPOSITORY}:latest
 
-      - name: Build and push image
-        shell: bash
+      - name: Deploy to ECS
         run: |
-          set -euo pipefail
-          REG="${{ steps.login.outputs.registry }}"
-          docker build -t "$REG/${ECR_REPO}:latest" .
-          docker push "$REG/${ECR_REPO}:latest"
-
-      - name: Deploy CloudFormation
-        shell: bash
-        env:
-          VPC_ID: ${{ secrets.VPC_ID }}
-          SUBNET1: ${{ secrets.SUBNET1 }}
-          SUBNET2: ${{ secrets.SUBNET2 }}
-          ECS_SG_ID: ${{ secrets.ECS_SG_ID }}
-          ASSIGN_PUBLIC_IP: ${{ secrets.ASSIGN_PUBLIC_IP }}
-        run: |
-          set -euo pipefail
-          REG="${{ steps.login.outputs.registry }}"
-
-          aws cloudformation deploy \
-            --template-file infra/service.yml \
-            --stack-name "${STACK_NAME}" \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              BaseStackName="${BASE_STACK}" \
-              ServiceName=hindp \
-              ContainerImage="$REG/${ECR_REPO}:latest" \
-              ListenerPriority=10 \
-              VpcId="$VPC_ID" \
-              Subnet1="$SUBNET1" \
-              Subnet2="$SUBNET2" \
-              EcsTaskSecurityGroupId="$ECS_SG_ID" \
-              AssignPublicIp="$ASSIGN_PUBLIC_IP"
+          aws ecs update-service \
+            --cluster ${ECS_CLUSTER} \
+            --service ${ECS_SERVICE} \
+            --force-new-deployment
