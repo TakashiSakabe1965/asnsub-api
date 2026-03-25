@@ -64,4 +64,3 @@ jobs:
             --cluster $ECS_CLUSTER \
             --service ${{ matrix.api.ecs_service }} \
             --force-new-deployment
-``
