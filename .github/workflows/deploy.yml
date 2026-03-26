@@ -1,4 +1,5 @@
 name: Deploy APIs to ECS
+
 on:
   push:
     branches: [ main ]
@@ -21,12 +22,10 @@ jobs:
             dir: services/hindp
             ecr: asnsub-hindp
             ecs_service: asnsub-api-hindp-v2
-
           - name: hinpr
             dir: services/hinpr
             ecr: asnsub-hinpr
             ecs_service: asnsub-api-hinpr-v2
-
           # ↓ 追加する時はここに書くだけ
           # - name: hinfl
           #   dir: services/hinfl
@@ -52,10 +51,8 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker build -t ${{ matrix.api.ecr }}:latest .
-          docker tag ${{ matrix.api.ecr }}:latest \
-            $ECR_REGISTRY/${{ matrix.api.ecr }}:latest
-          docker push \
-            $ECR_REGISTRY/${{ matrix.api.ecr }}:latest
+          docker tag ${{ matrix.api.ecr }}:latest $ECR_REGISTRY/${{ matrix.api.ecr }}:latest
+          docker push $ECR_REGISTRY/${{ matrix.api.ecr }}:latest
 
       - name: Deploy to ECS
         run: |
