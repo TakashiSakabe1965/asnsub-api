@@ -1,0 +1,13 @@
+{
+  "name": "asnsub-hinfl",
+  "version": "1.0.0",
+  "description": "HINFL 品番変換 API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node tests/run-cases.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
