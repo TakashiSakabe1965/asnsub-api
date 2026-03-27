@@ -22,14 +22,16 @@ jobs:
             dir: services/hindp
             ecr: asnsub-hindp
             ecs_service: asnsub-api-hindp-v2
+
           - name: hinpr
             dir: services/hinpr
             ecr: asnsub-hinpr
             ecs_service: asnsub-api-hinpr-v2
-           - name: hinfl
-             dir: services/hinfl
-             ecr: asnsub-hinfl
-             ecs_service: asnsub-api-hinfl-v2
+
+          - name: hinfl
+            dir: services/hinfl
+            ecr: asnsub-hinfl
+            ecs_service: asnsub-api-hinfl-v2
 
     steps:
       - uses: actions/checkout@v4
